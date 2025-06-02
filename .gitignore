@@ -1,0 +1,21 @@
+# Byte-compiled / virtualenv
+__pycache__/
+*.pyc
+.env/
+venv/
+
+# Video and frame data
+*.mp4
+frames/
+enhanced/
+output/
+
+# AWS creds
+*.pem
+*.key
+*.json
+
+# OS/IDE-specific
+.DS_Store
+.idea/
+.vscode/

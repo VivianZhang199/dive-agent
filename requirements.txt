@@ -1,0 +1,3 @@
+boto3
+openai
+opencv-contrib-python-headless

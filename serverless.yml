@@ -1,0 +1,31 @@
+service: dive-agent
+
+provider:
+  name: aws
+  region: ap-southeast-2
+  architecture: x86_64
+  timeout: 240
+  memorySize: 2048
+  role: arn:aws:iam::407401394575:role/vivian-dive-agent
+  environment:
+    BUCKET_NAME: vivian-dive-bucket
+    REGION: ap-southeast-2
+    SECRET_NAME: dive-analysis-openai-key
+  ecr:
+    images:
+      diveprocessor:
+        path: .
+
+functions:
+  analyse-dive:
+    image:
+      name: diveprocessor
+    events:
+      - httpApi:   
+          path: /analyze
+          method: post
+      #- s3:
+      #    bucket: vivian-dive-bucket
+      #    event: s3:ObjectCreated:*
+      #    rules:
+      #      - prefix: uploads/
