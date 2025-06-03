@@ -40,7 +40,7 @@ def extract_gpt_data(gpt_output_url):
 
 
 def update_knowledge_base():
-    kb = {'species_seen': {}}
+    kb = {'dives': {}}
     seen_video_keys = set()
     metadata_keys = list_metadata_keys()
 
@@ -51,35 +51,55 @@ def update_knowledge_base():
             metadata = load_json_from_s3(meta_key)
             s3_key = metadata.get('s3_key')
 
+            # Skip any duplicates
             if not s3_key or s3_key in seen_video_keys:
+                logger.info(f"Skipping duplicate video: {s3_key}")
                 continue
-
             seen_video_keys.add(s3_key)
-            logger.info(f"Seen video key: {seen_video_keys}")
+            
+            # Required metadata
+            dive_date = metadata.get('dive_date')
+            dive_number = metadata.get('dive_number')
+            if not dive_date or not dive_number:
+                logger.info(f"Skipping session without dive info: {meta_key}")
+                continue
 
             session_id = metadata.get('session_id')
             video_filename = metadata.get('video_filename')
             gpt_output_url = metadata.get('gpt_output_url')
             frame_urls = metadata.get('frame_urls', [])
+            dive_location = metadata.get('dive_location')
 
             gpt = extract_gpt_data(gpt_output_url)
 
+            if not gpt['animal'] or gpt['animal'].lower() == 'unknown':
+                continue
+
             matched_url = next((url for url in frame_urls if gpt['filename'] in url), None)
             if not matched_url:
-                logger.warning(f"No matching frame url found for {gpt['filename]']} in session {session_id}")
+                logger.warning(f"No matching frame URL found for {gpt['filename]']} in session {session_id}")
                 continue
             
-            sighting = {
-                "session_id": session_id,
-                "video_filename": video_filename,
-                "s3_key": s3_key,
-                "filename": gpt["filename"],
-                "image_url": matched_url,
-                "description": gpt["description"]
-            }
+            dive_key = f"{dive_date}_#{dive_number}"
+            dive_entry = kb['dives'].setdefault(dive_key, {
+                'dive_date': dive_date,
+                'dive_number': dive_number,
+                'dive_location': dive_location,
+                'sessions': [],
+                'species_seen': []
+            })
 
-            species_key = gpt["animal"].lower()
-            kb['species_seen'].setdefault(species_key, []).append(sighting)
+            if session_id not in dive_entry['sessions']:
+                dive_entry['sessions'].append(session_id)
+                dive_entry['species_seen'].append({
+                    'name': gpt['animal'],
+                    'confidence': gpt['confidence'],
+                    'description': gpt['description'], 
+                    'image_url': matched_url,
+                    'video_filename': video_filename,
+                    's3_key': s3_key,
+                    'session_id': session_id
+                })
         
         except Exception as e:
             logger.error(f"Error processing {meta_key}: {str(e)}")
