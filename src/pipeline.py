@@ -4,6 +4,7 @@ import secrets
 import logging
 import json
 import boto3
+import hashlib
 
 from config import config 
 from extract_frames import extract_n_frames
@@ -15,15 +16,18 @@ logging.basicConfig(level=logging.INFO)
 
 s3 = boto3.client('s3')
 
-def generate_timestamp_id():
+'''def generate_timestamp_id():
     timestamp = datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
     random_hex = secrets.token_hex(5)
-    return f"{timestamp}_{random_hex}"
+    return f"{timestamp}_{random_hex}"'''
+
+def generate_session_id(s3_key):
+    return hashlib.md5(s3_key.encode()).hexdigest()
 
 def run_pipeline(s3_key):
     """Complete pipeline for processing dive videos"""
     temp_video_path = None
-    session_id = generate_timestamp_id()
+    session_id = generate_session_id(s3_key)
 
     upload_date = datetime.date.today().isoformat()
     extracted_date = upload_date
@@ -84,4 +88,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'GX010052_ALTA4463795217888132720~4.mp4')
+    run_pipeline(s3_key = 'raw/GX010052_ALTA4463795217888132720~4.mp4')
