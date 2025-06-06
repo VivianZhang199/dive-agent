@@ -115,19 +115,31 @@ def update_knowledge_base():
 def update_dynamodb_from_kb(kb):
     for dive_id, dive_data in kb['dives'].items():
         try:
-            table.put_item(
-                Item = {
-                    'dive_id': dive_id,
-                    'dive_date': dive_data['dive_date'],
-                    'dive_number': dive_data['dive_number'],
-                    'dive_location': dive_data['dive_location'],
-                    'sessions': dive_data['sessions'],
-                    'species_seen': dive_data['species_seen']                
-                    }
-            )
-            logger.info(f"Updated dive {dive_id} in dynamodb table dive-knowledge-base")
+            # Fetch the current record from DynamoDB
+            response = table.get_item(Key = {"dive_id": dive_id})
+            existing_item = response.get("Item", {})
+
+            # Compare existing item to new data
+
+            new_data = {
+                "dive_id": dive_id,
+                "dive_date": dive_data["dive_date"],
+                "dive_number": dive_data["dive_number"],
+                "dive_location": dive_data["dive_location"],
+                "sessions": dive_data["sessions"],
+                "species_seen": dive_data["species_seen"]
+            }
+
+            if existing_item and existing_item == new_data:
+                logger.info(f"No change for {dive_id}, skipping update to dive-knowledge-base")
+                continue
+
+            # Update or insert
+            table.put_item(Item = new_data)
+            logger.info(f"{'Updated' if existing_item else 'Inserted'} dive {dive_id} in dynamodb table dive-knowledge-base")
+         
         except ClientError as e:
-            logger.error(f"Error updating dynamodb table dive-knowledge-base for dive {dive_id}: {str(e)}")
+            logger.error(f"Failed to update dive {dive_id}: {str(e)}")
 
 '''def save_kb_to_s3(kb, key = "brain_kb.json"):
     s3.put_object(
