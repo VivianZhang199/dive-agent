@@ -10,8 +10,8 @@ from extract_frames import extract_n_frames
 from analyse_with_gpt import analyse_with_gpt, load_system_prompt
 from utils import upload_string_to_s3, download_video_from_s3
 
-logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 s3 = boto3.client('s3')
 
@@ -30,8 +30,12 @@ def run_pipeline(s3_key):
     confirmed_date = "unknown"
 
     try:
-        temp_video_path = f"{config.TEMP_DIR}/{os.path.basename(s3_key)}"
+        logger.info(f"Downloading video from S3: {s3_key}")
+        temp_video_path = f"{config.TEMP_DIR}/{s3_key}"
+        os.makedirs(os.path.dirname(temp_video_path), exist_ok=True)
+        
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
+        logger.info(f"Downloaded video to {temp_video_path}")
         
         base_prefix = f"dives/{session_id}"
         frames_prefix = f"{base_prefix}/frames"
@@ -62,7 +66,7 @@ def run_pipeline(s3_key):
         # Session metadata
         metadata = {
             'session_id': session_id,
-            'video_filename': os.path.basename(s3_key),
+            'video_filename': s3_key.split("/")[-1],
             's3_key': s3_key,
             'dive_date': None,
             'dive_number': None,
@@ -84,4 +88,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'GX010052_ALTA4463795217888132720~4.mp4')
+    run_pipeline(s3_key = 'raw/GX010477_ALTA4463795217888132720~3.mp4')

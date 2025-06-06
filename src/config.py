@@ -3,11 +3,12 @@ import json
 import boto3
 import logging
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class Config:
     
-    BUCKET_NAME = os.environ.get('BUCKET_NAME', 'vivian-dive-bucket')
+    BUCKET_NAME = os.environ.get('BUCKET_NAME', 'vivian-dive-bucket-dev')
     REGION = os.environ.get('AWS_REGION', 'ap-southeast-2')
     SECRET_NAME = os.environ.get('SECRET_NAME', 'dive-analysis-openai-key')
     MAX_FRAMES = int(os.environ.get('MAX_FRAMES', '3'))
