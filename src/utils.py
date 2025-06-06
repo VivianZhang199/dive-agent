@@ -9,7 +9,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def upload_string_to_s3(string_data, bucket, key):
-    s3.upload_fileobj(io.BytesIO(string_data.encode()), bucket, key)
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=string_data
+    )
     logger.info(f"Uploaded data to s3://{bucket}/{key}")
 
 def download_video_from_s3(bucket, key, destination):

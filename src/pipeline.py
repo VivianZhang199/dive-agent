@@ -4,9 +4,10 @@ import secrets
 import logging
 import json
 import boto3
+import hashlib
 
 from config import config 
-from extract_frames import extract_n_frames
+from extract_frames import extract_frames
 from analyse_with_gpt import analyse_with_gpt, load_system_prompt
 from utils import upload_string_to_s3, download_video_from_s3
 
@@ -19,21 +20,16 @@ def generate_session_id(s3_key):
     return hashlib.md5(s3_key.encode()).hexdigest()
 
 def run_pipeline(s3_key):
-    """Complete pipeline for processing dive videos"""
-    temp_video_path = None
     session_id = generate_session_id(s3_key)
-    
-    upload_date = datetime.date.today().isoformat()
-    extracted_date = upload_date
-    confirmed_date = "unknown"
 
     try:
-        logger.info(f"Downloading video from S3: {s3_key}")
-        temp_video_path = f"{config.TEMP_DIR}/{s3_key}"
-        os.makedirs(os.path.dirname(temp_video_path), exist_ok=True)
-        
+        logger.info(f"Downloading the video from S3: {s3_key}")
+
+        # Extract the filename from the s3 key and download directly to the /tmp directory
+        filename = s3_key.split("/")[-1]
+        temp_video_path = f"{config.TEMP_DIR}/{filename}"
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
-        logger.info(f"Downloaded video to {temp_video_path}")
+        logger.info(f"Successfully downloaded the video to {temp_video_path}.")
         
         base_prefix = f"dives/{session_id}"
         frames_prefix = f"{base_prefix}/frames"
@@ -41,10 +37,10 @@ def run_pipeline(s3_key):
         gpt_output_key = f"{base_prefix}/gpt_output.json"
         reasoning_key = f"{base_prefix}/reasoning.txt"
 
-        logger.info(f"Processing dive session | Session ID: {session_id}")
+        logger.info(f"Processing dive session with s3 key: {s3_key} | Session ID: {session_id}")
 
         # Extract and upload frames
-        image_urls = extract_n_frames(
+        image_urls = extract_frames(
             temp_video_path, 
             s3, 
             config.BUCKET_NAME, 
@@ -85,4 +81,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'raw/GX010477_ALTA4463795217888132720~3.mp4')
+    run_pipeline(s3_key = 'raw/GX010345_ALTA4463795217888132720~4.mp4')
