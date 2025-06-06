@@ -25,7 +25,7 @@ def build_image_input(image_urls, prompt_text):
 def load_system_prompt():
     """ Load system prompt from S3 for Lambda compatbility"""
     try:
-        with open('system_prompt.txt', 'r') as f:
+        with open('system_prompt_v2.txt', 'r') as f:
             return f.read().strip()
     except FileNotFoundError:
         logger.error("System prompt file not found")
