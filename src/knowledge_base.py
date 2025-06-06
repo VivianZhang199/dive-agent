@@ -1,4 +1,5 @@
 import boto3
+from botocore.exceptions import ClientError
 import json
 import logging
 import os
@@ -9,6 +10,10 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 s3 = boto3.client("s3")
+
+dynamodb = boto3.resource('dynamodb', region_name = config.REGION)
+table = dynamodb.Table('dive-knowledge-base')
+
 
 def list_metadata_keys(prefix="dives/"):
     """List all session_metadata.json keys in the bucket."""
@@ -80,8 +85,8 @@ def update_knowledge_base():
                 logger.warning(f"No matching frame URL found for {gpt['filename]']} in session {session_id}")
                 continue
             
-            dive_key = f"{dive_date}_#{dive_number}"
-            dive_entry = kb['dives'].setdefault(dive_key, {
+            dive_id = f"{dive_date}_#{dive_number}"
+            dive_entry = kb['dives'].setdefault(dive_id, {
                 'dive_date': dive_date,
                 'dive_number': dive_number,
                 'dive_location': dive_location,
@@ -107,13 +112,32 @@ def update_knowledge_base():
 
     return kb
 
-def save_kb_to_s3(kb, key = "brain_kb.json"):
+def update_dynamodb_from_kb(kb):
+    for dive_id, dive_data in kb['dives'].items():
+        try:
+            table.put_item(
+                Item = {
+                    'dive_id': dive_id,
+                    'dive_date': dive_data['dive_date'],
+                    'dive_number': dive_data['dive_number'],
+                    'dive_location': dive_data['dive_location'],
+                    'sessions': dive_data['sessions'],
+                    'species_seen': dive_data['species_seen']                
+                    }
+            )
+            logger.info(f"Updated dive {dive_id} in dynamodb table dive-knowledge-base")
+        except ClientError as e:
+            logger.error(f"Error updating dynamodb table dive-knowledge-base for dive {dive_id}: {str(e)}")
+
+'''def save_kb_to_s3(kb, key = "brain_kb.json"):
     s3.put_object(
         Bucket=config.BUCKET_NAME,
         Key=key,
         Body=json.dumps(kb, indent=2).encode("utf-8")
     )
-    logger.info(f"Saved KB to s3://{BUCKET_NAME}/{key}")
+    logger.info(f"Saved KB to s3://{BUCKET_NAME}/{key}")'''
+
 if __name__ == "__main__":
     #print(extract_gpt_data('https://vivian-dive-bucket.s3.ap-southeast-2.amazonaws.com/dives/20250602093056_fbe6dcd954/gpt_output.json'))
-    print(update_knowledge_base())
+    #print(update_knowledge_base())
+    update_dynamodb_from_kb(kb = update_knowledge_base())
