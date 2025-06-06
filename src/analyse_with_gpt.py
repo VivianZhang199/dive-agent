@@ -47,23 +47,27 @@ def analyse_with_gpt(image_urls, system_prompt):
             input=messages
         )
         full_output = response.output_text
-        logger.debug(f"GPT response: {full_output}")
+        logger.info(f"GPT response: {full_output}")
 
         match = re.search(r'<BEGIN_JSON>(.*?)<END_JSON>', full_output, re.DOTALL)
         if not match:
             raise ValueError("No JSON found in GPT response")
 
         json_str = match.group(1).strip()
-        reasoning_text = full_output[:match.start()].strip()
 
         # Validate JSON
         parsed_json = json.loads(json_str)
+        clean_json = json.dumps(parsed_json, indent=2)
 
         return {
-            "reasoning_text": reasoning_text,
-            "json_only": json.dumps(parsed_json, indent=2)
+            "json_only": clean_json
         }
         
     except Exception as e:
         logger.error(f"Error in GPT analysis: {str(e)}")
         raise
+
+if __name__ == "__main__":
+    system_prompt = load_system_prompt()
+    gpt_result = analyse_with_gpt(image_urls, system_prompt)
+    print(gpt_result)
