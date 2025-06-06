@@ -9,7 +9,7 @@ import hashlib
 from config import config 
 from extract_frames import extract_frames
 from analyse_with_gpt import analyse_with_gpt, load_system_prompt
-from utils import upload_string_to_s3, download_video_from_s3
+from utils import write_to_s3, download_video_from_s3
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def run_pipeline(s3_key):
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
         logger.info(f"Successfully downloaded the video to {temp_video_path}.")
         
-        base_prefix = f"dives/{session_id}"
+        base_prefix = f"processed/{session_id}"
         frames_prefix = f"{base_prefix}/frames"
         metadata_key = f"{base_prefix}/session_metadata.json"
         gpt_output_key = f"{base_prefix}/gpt_output.json"
@@ -42,20 +42,19 @@ def run_pipeline(s3_key):
         # Extract and upload frames
         image_urls = extract_frames(
             temp_video_path, 
-            s3, 
-            config.BUCKET_NAME, 
+            s3,  
             frames_prefix, 
             config.MAX_FRAMES, 
             config.FRAME_INTERVAL
         )
-
+        
         # Run GPT analysis
         system_prompt = load_system_prompt()
+        logger.info(f"Image URLs: {image_urls}")
         gpt_result = analyse_with_gpt(image_urls, system_prompt)
 
         # Upload reasoning and JSON to S3
-        upload_string_to_s3(gpt_result['reasoning_text'], config.BUCKET_NAME, reasoning_key)
-        upload_string_to_s3(gpt_result['json_only'], config.BUCKET_NAME, gpt_output_key)
+        write_to_s3(gpt_result['json_only'], config.BUCKET_NAME, gpt_output_key)
 
         # Session metadata
         metadata = {
@@ -65,9 +64,9 @@ def run_pipeline(s3_key):
             'dive_date': None,
             'dive_number': None,
             'dive_location': None,
-            'gpt_output_url': f"https://{config.BUCKET_NAME}.s3.{config.REGION}.amazonaws.com/{gpt_output_key}"
+            'gpt_output_url': gpt_output_key
         }
-        upload_string_to_s3(json.dumps(metadata, indent=2), config.BUCKET_NAME, metadata_key)
+        write_to_s3(json.dumps(metadata, indent=2), config.BUCKET_NAME, metadata_key)
 
         logger.info(f"Dive Pipeline Complete: {session_id}")
         return session_id

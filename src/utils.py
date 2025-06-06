@@ -8,7 +8,7 @@ s3 = boto3.client('s3')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def upload_string_to_s3(string_data, bucket, key):
+def write_to_s3(string_data, bucket, key):
     s3.put_object(
         Bucket=bucket,
         Key=key,
