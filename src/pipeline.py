@@ -11,7 +11,6 @@ from analyse_with_gpt import analyse_with_gpt, load_system_prompt
 from utils import upload_string_to_s3, download_video_from_s3
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 s3 = boto3.client('s3')
 
@@ -84,4 +83,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'GX010052_ALTA4463795217888132720~4.mp4')
+    run_pipeline(s3_key = 'raw/GX010353_ALTA4463795217888132720~3.mp4')

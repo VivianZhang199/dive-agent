@@ -8,7 +8,7 @@ provider:
   memorySize: 2048
   role: arn:aws:iam::407401394575:role/vivian-dive-agent
   environment:
-    BUCKET_NAME: vivian-dive-bucket
+    BUCKET_NAME: vivian-dive-bucket-${sls:stage}
     REGION: ap-southeast-2
     SECRET_NAME: dive-analysis-openai-key
   ecr:
@@ -21,11 +21,8 @@ functions:
     image:
       name: diveprocessor
     events:
-      - httpApi:   
-          path: /analyze
-          method: post
-      #- s3:
-      #    bucket: vivian-dive-bucket
-      #    event: s3:ObjectCreated:*
-      #    rules:
-      #      - prefix: uploads/
+      - s3:
+          bucket: vivian-dive-bucket-${sls:stage}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: raw/
