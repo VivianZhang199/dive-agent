@@ -32,7 +32,7 @@ def load_system_prompt():
         raise
 
 def analyse_with_gpt(image_urls, system_prompt):
-    logger.info(f"Analysing with GPT: {image_urls}")
+    logger.debug(f"Analysing with GPT: {image_urls}")
     try:
         client = get_openai_client()
         prompt_text = "Here are several cropped frames from a dive video."

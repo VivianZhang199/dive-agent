@@ -1,6 +1,7 @@
 from pipeline import run_pipeline
 import json
 import logging
+import urllib.parse
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -11,7 +12,9 @@ def lambda_handler(event, context):
     if 'Records' in event:
         s3_record = event['Records'][0]['s3']
         s3_key = s3_record['object']['key']
-        logger.info(f"S3 key: {s3_key}")
+        #URL decode the s3 key
+        s3_key = urllib.parse.unquote_plus(s3_key)
+        logger.info(f"S3 key (decoded): {s3_key}")
 
     else:
         s3_key = event.get('s3_key')
@@ -46,7 +49,18 @@ if __name__ == "__main__":
             }
         ]
     }
-    result = lambda_handler(s3_event, None)
+
+    s3_event_encoded = {
+        'Records': [
+            {
+                's3': {
+                    'bucket': {'name': 'vivian-dive-bucket'},
+                    'object': {'key': 'raw/GX010477_ALTA4463795217888132720%7E3.mp4'}
+                }
+            }
+        ]
+    }
+    result = lambda_handler(s3_event_encoded, None)
     print(f"Lambda result: {result}")
 
     

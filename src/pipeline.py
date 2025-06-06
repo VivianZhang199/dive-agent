@@ -31,8 +31,11 @@ def run_pipeline(s3_key):
 
     try:
         logger.info(f"Downloading video from S3: {s3_key}")
-        temp_video_path = f"{config.TEMP_DIR}/{os.path.basename(s3_key)}"
+        temp_video_path = f"{config.TEMP_DIR}/{s3_key}"
+        os.makedirs(os.path.dirname(temp_video_path), exist_ok=True)
+        
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
+        logger.info(f"Downloaded video to {temp_video_path}")
         
         base_prefix = f"dives/{session_id}"
         frames_prefix = f"{base_prefix}/frames"
@@ -63,7 +66,7 @@ def run_pipeline(s3_key):
         # Session metadata
         metadata = {
             'session_id': session_id,
-            'video_filename': os.path.basename(s3_key),
+            'video_filename': s3_key.split("/")[-1],
             's3_key': s3_key,
             'dive_date': None,
             'dive_number': None,
