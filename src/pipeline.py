@@ -15,16 +15,14 @@ logger = logging.getLogger(__name__)
 
 s3 = boto3.client('s3')
 
-def generate_timestamp_id():
-    timestamp = datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
-    random_hex = secrets.token_hex(5)
-    return f"{timestamp}_{random_hex}"
+def generate_session_id(s3_key):
+    return hashlib.md5(s3_key.encode()).hexdigest()
 
 def run_pipeline(s3_key):
     """Complete pipeline for processing dive videos"""
     temp_video_path = None
-    session_id = generate_timestamp_id()
-
+    session_id = generate_session_id(s3_key)
+    
     upload_date = datetime.date.today().isoformat()
     extracted_date = upload_date
     confirmed_date = "unknown"
@@ -71,8 +69,7 @@ def run_pipeline(s3_key):
             'dive_date': None,
             'dive_number': None,
             'dive_location': None,
-            'gpt_output_url': f"https://{config.BUCKET_NAME}.s3.{config.REGION}.amazonaws.com/{gpt_output_key}",
-            'frame_urls': image_urls
+            'gpt_output_url': f"https://{config.BUCKET_NAME}.s3.{config.REGION}.amazonaws.com/{gpt_output_key}"
         }
         upload_string_to_s3(json.dumps(metadata, indent=2), config.BUCKET_NAME, metadata_key)
 
