@@ -4,7 +4,9 @@ import tempfile
 import shutil
 import logging
 from config import config
+from utils import generate_presigned_url
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def extract_n_frames(video_path, s3_client, bucket_name, s3_prefix, max_frames, frame_interval):
@@ -51,7 +53,7 @@ def extract_n_frames(video_path, s3_client, bucket_name, s3_prefix, max_frames, 
             logger.info(f"Uploaded frame {i+1} to s3://{bucket_name}/{key}")
             os.remove(filepath)
 
-            url = f"https://{bucket_name}.s3.{config.REGION}.amazonaws.com/{key}"
+            url = generate_presigned_url(bucket_name, key)
             saved_urls.append(url)
         return saved_urls
     

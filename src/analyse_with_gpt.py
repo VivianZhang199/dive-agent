@@ -4,6 +4,7 @@ import re
 from openai import OpenAI
 from config import config
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_openai_client():

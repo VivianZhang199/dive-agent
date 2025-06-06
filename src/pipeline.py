@@ -10,6 +10,7 @@ from extract_frames import extract_n_frames
 from analyse_with_gpt import analyse_with_gpt, load_system_prompt
 from utils import upload_string_to_s3, download_video_from_s3
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 s3 = boto3.client('s3')
@@ -29,6 +30,7 @@ def run_pipeline(s3_key):
     confirmed_date = "unknown"
 
     try:
+        logger.info(f"Downloading video from S3: {s3_key}")
         temp_video_path = f"{config.TEMP_DIR}/{os.path.basename(s3_key)}"
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
         
@@ -83,4 +85,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'raw/GX010353_ALTA4463795217888132720~3.mp4')
+    run_pipeline(s3_key = 'raw/GX010477_ALTA4463795217888132720~3.mp4')
