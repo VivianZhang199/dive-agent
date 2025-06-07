@@ -57,7 +57,7 @@ def update_session_metadata(session_id, dive_date=None, dive_number=None, dive_l
 
 # --- Claude setup ---
 SYSTEM_PROMPT = """
-You are a helpful and grounded dive assistant who helps users manage dive sessions.
+You are a helpful and grounded dive assistant who helps users manage dive sessions. Always start with 'Howdy!'
 
 You can use tools to:
 - Update missing dive metadata (dive date, number, location)
@@ -147,12 +147,23 @@ def invoke_claude(include_tools=True):
             if tool == "update_session_metadata":
                 update_session_metadata(**args)
 
+                updated = json.dumps(session, indent=2)
+
             if assistant_reply:
-                assistant_reply += f"\n✅ Tool `{tool}` called successfully."
-            else:
-                assistant_reply = f"✅ Tool `{tool}` called successfully."
+                assistant_reply += (
+                    f"\n✅ Tool `{tool}` called successfully."
+                    f"\n\nHere’s the updated session:\n\n```json\n{updated}\n```"
+                )
+
+                assistant_reply = (
+                    f"\n✅ Tool `{tool}` called successfully."
+                    f"\n\nHere’s the updated session:\n\n```json\n{updated}\n```"
+                )
     if assistant_reply:
         messages.append({"role": "assistant", "content": assistant_reply})
+        return assistant_reply
+    else:
+        return "🤖 Sorry, I didn’t catch that."
     
 
 if __name__ == "__main__":
