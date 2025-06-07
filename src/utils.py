@@ -2,6 +2,7 @@ import boto3
 import io
 import logging
 from config import config
+import json
 
 s3 = boto3.client('s3')
 

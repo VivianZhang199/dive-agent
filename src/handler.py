@@ -47,7 +47,7 @@ if __name__ == "__main__":
             {
                 's3': {
                     'bucket': {'name': 'vivian-dive-bucket'},
-                    'object': {'key': 'raw/GX010353_ALTA4463795217888132720~3.mp4'}
+                    'object': {'key': 'raw/VID-20250411-WA0001~2.mp4'}
                 }
             }
         ]
