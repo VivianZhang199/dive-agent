@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 from config import config
 from datetime import datetime
 import logging
+from utils import load_json_from_s3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -65,14 +66,32 @@ def update_session_metadata(session, session_id, dive_date=None, dive_number=Non
         logger.error(f"❌ Failed to update session metadata in S3: {e}")
         return False
 
+# --- Tool: Get GPT Analysis ---
+def get_gpt_analysis(session, session_id):
+    key = session.get("gpt_output_key")
+    print(f"key: {key}")
+    if not key:
+        logger.warning("No GPT output URL in session.")
+        return {"error": "No GPT analysis available for this session."}
+    try:
+        gpt_output = load_json_from_s3(key)
+        logger.info(f"✅ Retrieved GPT analysis for session {session_id}")
+        return gpt_output
+    except Exception as e:
+        logger.warning(f"❌ Failed to get GPT analysis for session {session_id}: {e}")
+        return {"error": "Failed to retrieve GPT analysis from storage."}
+
 # --- Claude setup ---
 SYSTEM_PROMPT = """
 🧠 **ROLE & PURPOSE**
-**You are a helpful and grounded dive assistant** who supports users in completing **specific dive session tasks**, like updating **dive session metadata** or answering dive questions.
+**You are a bubbly and helpful dive assistant** who supports users in completing **specific dive session tasks**, like updating **dive session metadata** or answering dive questions.
 
 🛠️ **TOOL USAGE**
 You can use tools to:
-- **Update missing dive metadata** (dive date, number, location)
+- **Update missing dive metadata**. Only the following fields are relevant: `dive date`, `dive number`, and `dive location`. Do not ask for or infer any other fields like dive duration, depth, or temperature. Use the `update_session_metadata` tool.
+- **Access video analysis results** from a separate vision model using the `get_gpt_analysis` tool.
+  > 📝 *Note:* The video was analyzed by another tool (ChatGPT). You can retrieve the results via the `get_gpt_analysis` tool. Do not guess the content — just show what the analysis says in plain terms.
+
 More tools may be added. Always rely on:
 - The **tool's description**
 - Its **input schema**
@@ -93,7 +112,7 @@ To decide:
 🎯 **TASK DISCIPLINE**
 - **Focus on completing one clear task at a time**.
 - Only call tools or respond in ways that **help complete the current task** (e.g, updating dive metadata).
-- **Do not suggest unrelated tasks**, explore other infomration, or speculate - unless the user **explicitly asks**.
+- **Do not suggest unrelated tasks**, explore other information, or speculate - unless the user **explicitly asks**.
 
 - If your tool call fails, clearly explain what’s wrong and ask the user for just the part that’s invalid.
 - After the user corrects it, retry the tool with the updated input.
@@ -104,12 +123,19 @@ To decide:
 - Keep replies **clear, concise, and helpful.**
 - Emojis (🐠, 🤿, ✅) are encouraged.
 - If multiple fields are missing, **ask for them in one short message** to keep things efficient and human.
+
+🔄 **CONVERSATION FLOW**
+- First, identify the current task (e.g., updating metadata or answering dive questions).
+- Ask for any missing info to complete the task.
+- Only after the current task is done, respond to new requests. Let the user know you're done with the current task before moving on to the next one.
+
+This helps you stay focused and not mix different tasks together.
 """
 
 TOOLS = [{
     "name": "update_session_metadata",
     "description": (
-        "Use this tool to update a dive session’s metadata. "
+        "Use this tool to update a dive session's metadata. "
         "All of the following fields must be clearly and explicitly provided by the user: "
         "`dive_date`, `dive_number`, and `dive_location`. "
         "Do not guess, infer, or assume values. "
@@ -136,6 +162,16 @@ TOOLS = [{
             }
         },
         "required": ["session_id", "dive_date", "dive_number", "dive_location"]
+    }
+}, {
+    "name": "get_gpt_analysis",
+    "description": "Returns the GPT-based video analysis, including identified animals, description, and confidence level.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "session_id": { "type": "string" }
+        },
+        "required": ["session_id"]
     }
 }]
 
@@ -183,27 +219,37 @@ def invoke_claude(session, include_tools=True):
             tool = message["name"]
             args = message["input"]
             
-            logger.info(f"\n🔧 Claude wants to call: {tool} with arguments: {json.dumps(args)}")
+            logger.info(f"\n🔧 Claude is calling: {tool} with arguments: {json.dumps(args)}")
 
             assistant_reply += (
-                f"\n\n🔧 Claude wants to call: `{tool}` with arguments:\n```json\n{json.dumps(args, indent=2)}\n```"
+                f"\n\n🔧 Claude is calling: `{tool}` with arguments:\n```json\n{json.dumps(args, indent=2)}\n```"
             )
+
+            result = None
+            success = False
 
             if tool == "update_session_metadata":
                 success = update_session_metadata(session,**args)
+                result = session if success else {"error": "Invalid input for dive metadata update."}
 
-                if success:
-                    updated = json.dumps(session, indent=2)
-                    assistant_reply += (
-                        f"\n✅ Tool `{tool}` called successfully."
-                        f"\n\nHere’s the updated session:\n\n```json\n{updated}\n```"
-                    )
-                else:
-                    assistant_reply = (
-                        f"⚠️ Tool `{tool}` failed due to invalid or missing input. "
-                        f"Please double-check the dive date (YYYY-MM-DD), number (numeric), and location (min 3 chars). "
-                        f"Let me know the corrected values so I can try again. 🛠️"
-                    )
+            elif tool == "get_gpt_analysis":
+                result = get_gpt_analysis(session, **args)
+                success = result and "error" not in result
+
+            if success:
+                messages.append({
+                    "role": "tool",
+                    "tool_use_id": message["id"],
+                    "name": tool,
+                    "content": json.dumps(result)
+                })
+            else:
+                messages.append({
+                    "role": "tool",
+                    "tool_use_id": message["id"],
+                    "name": tool,
+                    "content": json.dumps(result or {"error": "Tool execution failed."})
+                })
 
     if assistant_reply:
         messages.append({"role": "assistant", "content": assistant_reply})
