@@ -27,3 +27,7 @@ def generate_presigned_url(bucket_name, s3_key,expiration = 3600):
     except ClientError:
         logger.error(f"Failed to generate presigned URL for {s3_key}")
         raise
+
+def load_json_from_s3(key):
+    response = s3.get_object(Bucket=config.BUCKET_NAME, Key=key)
+    return json.loads(response['Body'].read().decode('utf-8'))
