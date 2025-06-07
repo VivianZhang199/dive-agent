@@ -9,8 +9,8 @@ s3 = boto3.client("s3")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def update_session_metadata(session_id, dive_date, dive_number, dive_location):
-    base_prefix = f"dives/{session_id}"
+def update_session_metadata(session_id, dive_date=None, dive_number=None, dive_location=None):
+    base_prefix = f"processed/{session_id}"
     metadata_key = f"{base_prefix}/session_metadata.json"
 
     try:
