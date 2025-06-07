@@ -50,7 +50,7 @@ def run_pipeline(s3_key):
         
         # Run GPT analysis
         system_prompt = load_system_prompt()
-        logger.info(f"Image URLs: {image_urls}")
+        logger.debug(f"Image URLs: {image_urls}")
         gpt_result = analyse_with_gpt(image_urls, system_prompt)
 
         # Upload reasoning and JSON to S3
@@ -80,4 +80,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'raw/GX010345_ALTA4463795217888132720~4.mp4')
+    run_pipeline(s3_key = 'raw/VID-20250411-WA0001~2.mp4')
