@@ -37,7 +37,7 @@ if uploaded_file and "session_loaded" not in st.session_state:
     with st.spinner("Uploading and processing your dive video..."):
         raw_s3_key = f"raw/{uploaded_file.name}"
         s3.upload_fileobj(uploaded_file, config.BUCKET_NAME, raw_s3_key)
-        st.success("✅ Video uploaded! Waiting for analysis...")
+        st.success("✅ Video successfully uploaded!")
         st.session_state["s3_key"] = raw_s3_key
 
         # Determine session ID + processed prefix
@@ -67,7 +67,7 @@ if uploaded_file and "session_loaded" not in st.session_state:
             st.session_state["session_loaded"] = True
             st.session_state["session"] = session
             first_reply = start_chat(session)
-            st.session_state.chat_history.append({"role": "assistant", "content": f"🤖 **Claude:** {first_reply}"})
+            st.session_state.chat_history.append({"role": "assistant", "content": f"{first_reply}"})
         else:
             st.error("⏳ Timed out waiting for session metadata. Try again later.")
 
