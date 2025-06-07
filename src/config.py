@@ -12,6 +12,7 @@ class Config:
     REGION = os.environ.get('AWS_REGION', 'ap-southeast-2')
     SECRET_NAME = os.environ.get('SECRET_NAME', 'dive-analysis-openai-key')
     MAX_FRAMES = int(os.environ.get('MAX_FRAMES', '3'))
+    KNOWLEDGE_BASE_TABLE = os.environ.get('KNOWLEDGE_BASE_TABLE', 'dive-knowledge-base')
     FRAME_INTERVAL = int(os.environ.get('FRAME_INTERVAL', '3'))
     TEMP_DIR = '/tmp'
 

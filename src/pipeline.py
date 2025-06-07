@@ -4,64 +4,57 @@ import secrets
 import logging
 import json
 import boto3
+import hashlib
 
 from config import config 
-from extract_frames import extract_n_frames
+from extract_frames import extract_frames
 from analyse_with_gpt import analyse_with_gpt, load_system_prompt
-from utils import upload_string_to_s3, download_video_from_s3
+from utils import write_to_s3, download_video_from_s3
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 s3 = boto3.client('s3')
 
-def generate_timestamp_id():
-    timestamp = datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
-    random_hex = secrets.token_hex(5)
-    return f"{timestamp}_{random_hex}"
+def generate_session_id(s3_key):
+    return hashlib.md5(s3_key.encode()).hexdigest()
 
 def run_pipeline(s3_key):
-    """Complete pipeline for processing dive videos"""
-    temp_video_path = None
-    session_id = generate_timestamp_id()
-
-    upload_date = datetime.date.today().isoformat()
-    extracted_date = upload_date
-    confirmed_date = "unknown"
+    session_id = generate_session_id(s3_key)
 
     try:
-        logger.info(f"Downloading video from S3: {s3_key}")
-        temp_video_path = f"{config.TEMP_DIR}/{s3_key}"
-        os.makedirs(os.path.dirname(temp_video_path), exist_ok=True)
-        
+        logger.info(f"Downloading the video from S3: {s3_key}")
+
+        # Extract the filename from the s3 key and download directly to the /tmp directory
+        filename = s3_key.split("/")[-1]
+        temp_video_path = f"{config.TEMP_DIR}/{filename}"
         download_video_from_s3(config.BUCKET_NAME, s3_key, temp_video_path)
-        logger.info(f"Downloaded video to {temp_video_path}")
+        logger.info(f"Successfully downloaded the video to {temp_video_path}.")
         
-        base_prefix = f"dives/{session_id}"
+        base_prefix = f"processed/{session_id}"
         frames_prefix = f"{base_prefix}/frames"
         metadata_key = f"{base_prefix}/session_metadata.json"
         gpt_output_key = f"{base_prefix}/gpt_output.json"
         reasoning_key = f"{base_prefix}/reasoning.txt"
 
-        logger.info(f"Processing dive session | Session ID: {session_id}")
+        logger.info(f"Processing dive session with s3 key: {s3_key} | Session ID: {session_id}")
 
         # Extract and upload frames
-        image_urls = extract_n_frames(
+        image_urls = extract_frames(
             temp_video_path, 
-            s3, 
-            config.BUCKET_NAME, 
+            s3,  
             frames_prefix, 
             config.MAX_FRAMES, 
             config.FRAME_INTERVAL
         )
-
+        
         # Run GPT analysis
         system_prompt = load_system_prompt()
+        logger.debug(f"Image URLs: {image_urls}")
         gpt_result = analyse_with_gpt(image_urls, system_prompt)
 
         # Upload reasoning and JSON to S3
-        upload_string_to_s3(gpt_result['reasoning_text'], config.BUCKET_NAME, reasoning_key)
-        upload_string_to_s3(gpt_result['json_only'], config.BUCKET_NAME, gpt_output_key)
+        write_to_s3(gpt_result['json_only'], config.BUCKET_NAME, gpt_output_key)
 
         # Session metadata
         metadata = {
@@ -71,10 +64,9 @@ def run_pipeline(s3_key):
             'dive_date': None,
             'dive_number': None,
             'dive_location': None,
-            'gpt_output_url': f"https://{config.BUCKET_NAME}.s3.{config.REGION}.amazonaws.com/{gpt_output_key}",
-            'frame_urls': image_urls
+            'gpt_output_url': gpt_output_key
         }
-        upload_string_to_s3(json.dumps(metadata, indent=2), config.BUCKET_NAME, metadata_key)
+        write_to_s3(json.dumps(metadata, indent=2), config.BUCKET_NAME, metadata_key)
 
         logger.info(f"Dive Pipeline Complete: {session_id}")
         return session_id
@@ -88,4 +80,4 @@ def run_pipeline(s3_key):
             os.remove(temp_video_path)
 
 if __name__ == "__main__":
-    run_pipeline(s3_key = 'raw/GX010477_ALTA4463795217888132720~3.mp4')
+    run_pipeline(s3_key = 'raw/VID-20250411-WA0001~2.mp4')

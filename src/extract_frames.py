@@ -9,8 +9,8 @@ from utils import generate_presigned_url
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def extract_n_frames(video_path, s3_client, bucket_name, s3_prefix, max_frames, frame_interval):
-    """Extract frames with proper error handling and cleanup for Lambda"""
+def extract_frames(video_path, s3_client, s3_prefix, max_frames, frame_interval):
+
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp(dir='/tmp')
@@ -49,11 +49,11 @@ def extract_n_frames(video_path, s3_client, bucket_name, s3_prefix, max_frames, 
             key = f"{s3_prefix}/{filename}"
 
             cv2.imwrite(filepath, frame)
-            s3_client.upload_file(filepath, bucket_name, key)
-            logger.info(f"Uploaded frame {i+1} to s3://{bucket_name}/{key}")
+            s3_client.upload_file(filepath, config.BUCKET_NAME, key)
+            logger.info(f"Uploaded frame {i+1} to s3://{config.BUCKET_NAME}/{key}")
             os.remove(filepath)
 
-            url = generate_presigned_url(bucket_name, key)
+            url = generate_presigned_url(config.BUCKET_NAME, key)
             saved_urls.append(url)
         return saved_urls
     
