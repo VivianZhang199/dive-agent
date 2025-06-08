@@ -1,25 +1,29 @@
-import sys
+import json
+import logging
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+import sys
+import time
+from datetime import datetime
 
 import boto3
-import json
 from botocore.exceptions import ClientError
-from config import config
-from datetime import datetime
-import logging
-from utils import load_json_from_s3
-import time
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from chat_session import ChatSession
+from config import config
+from utils import load_json_from_s3
 
+# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Model configuration
 MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
 
+# Initialise AWS clients
 bedrock = boto3.client("bedrock-runtime", region_name=config.REGION)
-s3 = boto3.client("s3", region_name = config.REGION)
+s3 = boto3.client("s3", region_name=config.REGION)
 
 UPDATE_METADATA_TOOL = {
     "name": "update_session_metadata",
@@ -42,12 +46,6 @@ UPDATE_METADATA_TOOL = {
     }
 }
 
-import chat_session as _cs
-_cs.UPDATE_METADATA_TOOL = UPDATE_METADATA_TOOL
-del _cs
-
-chat = ChatSession()
-
 def is_valid_date(date_str):
     try:
         datetime.strptime(date_str.strip(), "%Y-%m-%d")
@@ -61,21 +59,15 @@ def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None,
     session_id = chat.dive_session_id
     logger.info(f"Validating tool input for session {session_id}")
     
-    if dive_date and not is_valid_date(dive_date):
-        logger.warning("Dive date is invalid. Must be in YYYY-MM-DD format.")
-        return False
-    if dive_number and not dive_number.isdigit():
-        logger.warning("Dive number must be numeric.")
-        return False
-    if dive_location and len(dive_location) < 3:
-        logger.warning("Dive location seems too short or empty.")
+    try: 
+        datetime.strptime(date_str.strip(), "%Y-%m-%d")
+        assert dive_number.isdigit()
+        assert len(dive_location) >= 3
+    except Exception as e:
+        logger.warning("Validation failed")
         return False
 
-
-    logger.info(f"🔧 Updating session metadata for session_id={session_id}")
-    logger.info(f" - Date: {repr(dive_date)}")
-    logger.info(f" - Dive number: {repr(dive_number)}")
-    logger.info(f" - Location: {repr(dive_location)}")
+    logger.info(f"Inputs are valid. Updating session metadata for session_id={session_id}")
 
     chat.current_dive.update(
          dive_date=dive_date,
@@ -94,9 +86,11 @@ def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None,
             ContentType="application/json"
         )
         logger.info(f"✅ Session metadata saved to s3://{config.BUCKET_NAME}/{updated_key}")
+        chat.add("tool", json.dumps(chat.current_dive))
         return True
     except Exception as e:
         logger.error(f"❌ Failed to update session metadata in S3: {e}")
+        chat.add("tool", json.dumps({"error": str(e)}))
         return False
 
 # --- Claude setup ---
@@ -173,20 +167,7 @@ def start_chat(chat: ChatSession):
 def continue_chat(chat: ChatSession, user_input):
     chat.add("user", user_input)
     return invoke_claude(chat, include_tools=True)
-'''
-def send_system_event(session, event_type):
-    if event_type == "video_uploaded":
-        content = f"[SYSTEM_EVENT] video_uploaded | session_id={session['session_id']}"
-        print(f"video_uploaded | session_id={session['session_id']}")
-    else:
-        content = f"[SYSTEM_EVENT] {event_type}"
-
-    messages.append({
-        "role": "user",
-        "content": content
-    })
-    return invoke_claude(session, include_tools=True)
-'''
+    
 def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -249,17 +230,11 @@ def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
                 f"\n\n🔧 Claude is calling: `{tool}` with arguments:\n```json\n{json.dumps(args, indent=2)}\n```"
             )
 
-            result = None
-            success = False
-
             if tool == "update_session_metadata":
                 success = update_session_metadata(chat,**args)
-                result = chat.current_dive if success else {"error": "Invalid input for dive metadata update."}
+                payload = chat.current_dive if success else {"error": "Invalid input for dive metadata update."}
 
-                if success:
-                    chat.add("tool", json.dumps(result))
-                else:
-                    chat.add("tool", json.dumps(result))
+                chat.add("tool", json.dumps(payload))
 
     if assistant_reply:
         chat.add("assistant", assistant_reply)
@@ -270,6 +245,7 @@ def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
 
 if __name__ == "__main__":
     logger.info("🎬 Dive Agent Started – Type 'exit' to quit\n")
+    chat = ChatSession(available_tools=[UPDATE_METADATA_TOOL])
     start_chat(chat)
 
     while True:
