@@ -9,6 +9,7 @@ from config import config
 from datetime import datetime
 import logging
 from utils import load_json_from_s3
+import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -20,6 +21,9 @@ s3 = boto3.client("s3", region_name = config.REGION)
 
 # --- Global message history ---
 messages = []
+
+START_EVENT = {"role": "user", "content": "[SYSTEM_EVENT] start_conversation"}
+
 def is_valid_date(date_str):
     try:
         datetime.strptime(date_str.strip(), "%Y-%m-%d")
@@ -28,8 +32,9 @@ def is_valid_date(date_str):
         return False
 
 # --- Tool: Update metadata ---
-def update_session_metadata(session, session_id, dive_date=None, dive_number=None, dive_location=None):
-    print(f"session_id: {session_id}")
+def update_session_metadata(session, dive_date=None, dive_number=None, dive_location=None):
+    session_id = session["session_id"]
+    print(f"session: {session}")
     logger.info(f"Validating tool input for session {session_id}")
     if dive_date and not is_valid_date(dive_date):
         logger.warning("Dive date is invalid. Must be in YYYY-MM-DD format.")
@@ -90,8 +95,6 @@ Your name is **Claudey**. The emoji that best represents you is 🤠.
 🛠️ **TOOL USAGE**
 You can use tools to:
 - **Update missing dive metadata**. Only the following fields are relevant: `dive date`, `dive number`, and `dive location`. Do not ask for or infer any other fields like dive duration, depth, or temperature. Use the `update_session_metadata` tool.
-- **Access video analysis results** from a separate vision model using the `get_gpt_analysis` tool.
-  > 📝 *Note:* The video was analyzed by another tool (ChatGPT). You can retrieve the results via the `get_gpt_analysis` tool. Do not guess the content — just show what the analysis says in plain terms.
 
 More tools may be added. Always rely on:
 - The **tool's description**
@@ -158,10 +161,6 @@ TOOLS = [{
     "input_schema": {
         "type": "object",
         "properties": {
-            "session_id": {
-                "type": "string",
-                "description": "Unique session ID of the dive session to update."
-            },
             "dive_date": {
                 "type": "string",
                 "description": "Dive date in YYYY-MM-DD format."
@@ -175,28 +174,16 @@ TOOLS = [{
                 "description": "Dive location (e.g., 'North Alor'). Must be at least 3 characters."
             }
         },
-        "required": ["session_id", "dive_date", "dive_number", "dive_location"]
-    }
-}, {
-    "name": "get_gpt_analysis",
-    "description": "Returns the GPT-based video analysis, including identified animals, description, and confidence level.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "session_id": { "type": "string" }
-        },
-        "required": ["session_id"]
+        "required": ["dive_date", "dive_number", "dive_location"]
     }
 }]
 
 
 # --- Conversation Logic ---
-def start_chat(session):
-    messages.clear()
-    messages.append({
-        "role": "user",
-        "content": "[SYSTEM_EVENT] start_conversation"
-    })
+def start_chat(session, force_reset = False):
+    if force_reset or not messages:
+        messages.clear()
+        messages.append(START_EVENT)
     return invoke_claude(session or {}, include_tools=False)
 
 def continue_chat(session, user_input):
@@ -204,13 +191,19 @@ def continue_chat(session, user_input):
     return invoke_claude(session, include_tools=True)
 
 def send_system_event(session, event_type):
+    if event_type == "video_uploaded":
+        content = f"[SYSTEM_EVENT] video_uploaded | session_id={session['session_id']}"
+        print(f"video_uploaded | session_id={session['session_id']}")
+    else:
+        content = f"[SYSTEM_EVENT] {event_type}"
+
     messages.append({
         "role": "user",
-        "content": f"[SYSTEM_EVENT] {event_type}"
+        "content": content
     })
     return invoke_claude(session, include_tools=True)
 
-def invoke_claude(session, include_tools=True):
+def invoke_claude(session, include_tools=True, max_retries = 3):
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
         "system": SYSTEM_PROMPT,
@@ -229,8 +222,29 @@ def invoke_claude(session, include_tools=True):
         "body": json.dumps(payload)
     }
 
-    response = bedrock.invoke_model(**body)
-    response_body = json.loads(response["body"].read())
+    logger.info("Sending messages to Claude:")
+    for m in messages:
+        logger.info(f" - {m['role']}: {m['content'][:60]}")
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = bedrock.invoke_model(**body)
+            response_body = json.loads(response["body"].read())
+            break # Success - exit the loop
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ThrottlingException':
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Throttling detected. Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error("Max retries exceed for throttling")
+                    return "🤖 Sorry, I'm currently experiencing high demand. Please try again."
+            else:
+                logger.error(f"Bedrock API error {e}")
+                return "🤖 Sorry, I experienced an error. Please try again."
 
     assistant_reply = ""
 
@@ -256,24 +270,20 @@ def invoke_claude(session, include_tools=True):
                 success = update_session_metadata(session,**args)
                 result = session if success else {"error": "Invalid input for dive metadata update."}
 
-            elif tool == "get_gpt_analysis":
-                result = get_gpt_analysis(session, **args)
-                success = result and "error" not in result
-
-            if success:
-                messages.append({
-                    "role": "tool",
-                    "tool_use_id": message["id"],
-                    "name": tool,
-                    "content": json.dumps(result)
-                })
-            else:
-                messages.append({
-                    "role": "tool",
-                    "tool_use_id": message["id"],
-                    "name": tool,
-                    "content": json.dumps(result or {"error": "Tool execution failed."})
-                })
+                if success:
+                    messages.append({
+                        "role": "tool",
+                        "tool_use_id": message["id"],
+                        "name": tool,
+                        "content": json.dumps(result)
+                    })
+                else:
+                    messages.append({
+                        "role": "tool",
+                        "tool_use_id": message["id"],
+                        "name": tool,
+                        "content": json.dumps(result or {"error": "Tool execution failed."})
+                    })
 
     if assistant_reply:
         messages.append({"role": "assistant", "content": assistant_reply})

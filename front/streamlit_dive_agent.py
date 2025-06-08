@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from config import config
 from handler import lambda_handler
-from dive_agent_bedrock import start_chat, continue_chat, messages
+from dive_agent_bedrock import start_chat, continue_chat, messages, send_system_event
 from utils import load_json_from_s3
 import time
 import hashlib
