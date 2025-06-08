@@ -8,15 +8,18 @@ import uuid
 from datetime import datetime
 from config import config
 from handler import lambda_handler
-from dive_agent_bedrock import start_chat, continue_chat, messages, send_system_event
+from dive_agent_bedrock import start_chat, continue_chat
 from utils import load_json_from_s3
 import time
 import hashlib
 import json
+from chat_session import ChatSession
+import logging
 
 from botocore.exceptions import ClientError
 
 s3 = boto3.client("s3")
+logger = logging.getLogger(__name__) 
 
 st.set_page_config(page_title="Dive Agent", page_icon="🤿", layout="wide")
 col1, col2 = st.columns([1, 2])
@@ -29,101 +32,114 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-def get_presigned_video_url(key, expiration=3600):
-    try:
-        response = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": config.BUCKET_NAME, "Key": key},
-            ExpiresIn=expiration,
-        )
-        return response
-    except ClientError as e:
-        logger.warning(f"Couldn't generate pre-signed URL: {e}")
-        return None
+# Initialise the chat session
+if "chat" not in st.session_state:
+    chat = ChatSession()
+    st.session_state["chat"] = chat
 
-# LEFT: Upload video
+# Get the chat session from the session state
+chat: ChatSession = st.session_state["chat"]
+
+# Start the chat session with the user
+if "chat_started" not in st.session_state:
+    st.session_state["chat_started"] = True
+    first_reply = start_chat(chat)
+    
+# Left sidebar [Top section]: Video Upload
 with st.sidebar:
-    st.subheader("Upload media")
-    uploaded_file = st.file_uploader("Upload your dive video", type=["mp4", "mov"])
+    st.subheader("Upload a dive video!")
+    uploaded_file = st.file_uploader("Note: .mp4 or .mov videos are supported.", type=["mp4", "mov"])
 
-    if uploaded_file and not st.session_state.get("video_uploaded"):
+    # If a new video is uploaded, process it and update the chat session
+    if uploaded_file and uploaded_file.name != st.session_state.get("last_uploaded_filename"):
         with st.spinner("Uploading and processing your dive video..."):
             raw_s3_key = f"raw/{uploaded_file.name}"
-            s3.upload_fileobj(uploaded_file, config.BUCKET_NAME, raw_s3_key)
-            st.success("✅ Video successfully uploaded!")
-            st.session_state["video_uploaded"] = True
-            st.session_state["s3_key"] = raw_s3_key
+            if s3.upload_fileobj(uploaded_file, config.BUCKET_NAME, raw_s3_key):
+                st.success(f"✅ Video {uploaded_file.name} has been successfully uploaded!")
+            else:
+                st.error(f"❌ Failed to upload video {uploaded_file.name}.")
 
-            # Determine session ID + processed prefix
+            # Generate a unique deterministic session ID
             session_id = hashlib.md5(raw_s3_key.encode()).hexdigest()
-            processed_prefix = f"processed/{session_id}"
+            logger.info(f"Uploaded video file: {uploaded_file.name} | dive_session_id = {session_id}")
 
+            # Update the chat session with the new video
+            chat.dive_session_id = session_id
+            chat.current_dive = {}
+            chat.metadata_done = False
             
-            # 🕓 Poll for processed/{session_id}/session_metadata.json
+            # Send a system event to the chat session so that Claude knows the video has been uploaded
+            continue_chat(chat, "[SYSTEM_EVENT] video_uploaded")
+
+            st.session_state["last_uploaded_filename"] = uploaded_file.name
+            
+            processed_prefix = f"processed/{session_id}"
             timeout = 120
             start_time = time.time()
-
             metadata_key = None
+
             while time.time() - start_time < timeout:
                 result = s3.list_objects_v2(Bucket=config.BUCKET_NAME, Prefix=processed_prefix)
                 for obj in result.get("Contents", []):
                     if obj["Key"].endswith("session_metadata.json"):
                         metadata_key = obj["Key"]
                         break
-                
                 if metadata_key:
                     break
                 time.sleep(3)
 
+            # If the metadata is available (i.e., the video has been processed by the pipeline), load it into the chat session.
             if metadata_key:
-                session = load_json_from_s3(metadata_key)
-                st.session_state["session_loaded"] = True
-                st.session_state["session"] = session
-                followup = send_system_event(session, "video_uploaded")
-                st.session_state.chat_history.append({"role": "assistant", "content": followup})
+                chat.current_dive = load_json_from_s3(metadata_key)
+                chat.metadata_done = True
+                st.success("✅ The dive metadata has been loaded into the chat session.")
             else:
-                st.error("⏳ Timed out waiting for session metadata. Try again later.")
+                st.error("⏳ Timed out waiting to retrieve the session metadata. Re-check that the video has been processed by the pipeline.")
 
+    # Left sidebar [Bottom section]: Video Preview
     st.markdown("---")
     st.subheader("Video Preview")
-    if st.session_state.get("video_uploaded") and st.session_state.get("s3_key"):
-        video_url = get_presigned_video_url(st.session_state["s3_key"])
-        if video_url:
-            st.video(video_url)
-        else:
-            st.write("Video preview unavailable")
+    if uploaded_file is not None: 
+        # Generate a presigned URL for the S3 video so that it can be previewed in the browser
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": config.BUCKET_NAME, "Key": f"raw/{uploaded_file.name}"},
+            ExpiresIn=3600,
+        )
+        st.video(url)
 
-
-# 📣 Chat section
+# Chat interface
 st.title("🤿 Dive Agent")
+for message in chat.messages:
+    content = message["content"]
 
-# 👋 General intro
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-    first_reply = start_chat({})
-    st.session_state.chat_history.append({'role': 'assistant', 'content': first_reply})
+    # Skip display of system events
+    if content.startswith("[SYSTEM_EVENT]"):
+        continue
+    
+    role = message["role"]
+    if role == "assistant":
+        st.chat_message(role).write(f"🤖 **Dive Buddy Claude:** {content}")
+    else:
+        st.chat_message(role).write(content)
 
-# 💬 Chat history
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        if msg["role"] == "assistant":
-            st.markdown(f"🤖 **Dive Buddy Claude:** {msg['content']}")
-        else:
-            st.markdown(msg["content"])
-
-# 💬 Claude interaction
-user_input = st.chat_input("Help Dive Buddy Claude tag your dive session")
+# User interaction
+user_input = st.chat_input("Talk to Dive Buddy Claude.")
 
 if user_input:
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    st.chat_message("user").write(user_input)
+    # After the user input, continue the chat session with Claude
+    assistant_reply = continue_chat(chat, user_input)
+    st.chat_message("assistant").write(f"🤖 **Dive Buddy Claude:** {assistant_reply}")
 
-    # If no session exists, use an empty one 
-    session = st.session_state.get("session", {})
-    continue_chat(session, user_input)
-
-    reply = messages[-1]["content"] if messages else "Hmmm..."
-    with st.chat_message("assistant"):
-        st.markdown(f"🤖 **Dive Buddy Claude:** {reply}")
-    st.session_state.chat_history.append({"role": "assistant", "content": reply})
+# Debug section to help with dev
+with st.expander("🔍 Debug"):
+    st.write("Current ChatSession state")
+    st.json({
+        "dive_session_id": chat.dive_session_id,
+        "metadata_done": chat.metadata_done,
+        "current_dive": chat.current_dive,
+        "next_tools": chat.next_tools(),
+        "last_uploaded_filename": st.session_state.get("last_uploaded_filename"),
+        "messages": [f"{message['role']}: {message['content'][:60]}..." for message in chat.messages]
+    })
