@@ -58,9 +58,13 @@ def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None,
 
     session_id = chat.dive_session_id
     logger.info(f"Validating tool input for session {session_id}")
+
+    dive_date = dive_date.strip()
+    dive_number = dive_number.strip()
+    dive_location = dive_location.strip()
     
-    try: 
-        datetime.strptime(date_str.strip(), "%Y-%m-%d")
+    try:
+        datetime.strptime(dive_date, "%Y-%m-%d")
         assert dive_number.isdigit()
         assert len(dive_location) >= 3
     except Exception as e:
