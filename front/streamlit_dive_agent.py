@@ -112,6 +112,7 @@ with st.sidebar:
             start_time = time.time()
             metadata_key = None
 
+            time.sleep(15)
             while time.time() - start_time < timeout:
                 result = s3.list_objects_v2(Bucket=config.BUCKET_NAME, Prefix=processed_prefix)
                 for obj in result.get("Contents", []):

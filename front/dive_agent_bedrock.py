@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from datetime import datetime
+import re
 
 import boto3
 from botocore.exceptions import ClientError
@@ -54,6 +55,18 @@ def update_dive_information(chat: ChatSession, dive_date=None, dive_number=None,
     #session = chat.current_dive
     logger.info(f"Validating tool input for session {session_id}")
 
+    existing = chat.current_dive
+    no_fields_yet = not any(k in existing for k in ("dive_date","dive_number","dive_location"))
+    
+    # And the user hasn’t provided all three:
+    if no_fields_yet and (dive_date is None or dive_number is None or dive_location is None):
+        return {
+            "error": (
+                "Looks like we’re missing some initial info. "
+                "Please provide dive_date, dive_number and dive_location together."
+            )
+        }
+
     if dive_date is not None:
         try:
             dive_date = dive_date.strip()
@@ -61,7 +74,7 @@ def update_dive_information(chat: ChatSession, dive_date=None, dive_number=None,
         except Exception:
             return {"error": "Invalid date format—please use YYYY-MM-DD."}
         #session["dive_date"] = dive_date
-        chat.current_dive.update(dive_date=dive_date)
+        chat.current_dive["dive_date"] = dive_date
 
     if dive_number is not None:
         try:
@@ -70,14 +83,15 @@ def update_dive_information(chat: ChatSession, dive_date=None, dive_number=None,
         except Exception:
             return {"error": "Dive number must be a whole number."}
         #session["dive_number"] = dive_number
-        chat.current_dive.update(dive_number=dive_number)
+        chat.current_dive["dive_number"] = dive_number
 
     if dive_location is not None:
         dive_location = dive_location.strip()
         if len(dive_location) < 3:
             return {"error": "Dive location must be at least three characters."}
         #session["dive_location"] = dive_location
-        chat.current_dive.update(dive_location=dive_location)
+        chat.current_dive["dive_location"] = dive_location
+    logger.info(f"Updated dive information: {chat.current_dive}")
 
     updated_key = f"processed/{session_id}/session_metadata.json"
 
@@ -89,6 +103,11 @@ def update_dive_information(chat: ChatSession, dive_date=None, dive_number=None,
             ContentType="application/json"
         )
         logger.info(f"✅ Session metadata saved to s3://{config.BUCKET_NAME}/{updated_key}")
+
+        verify_obj = s3.get_object(Bucket=config.BUCKET_NAME, Key=updated_key)
+        verify_data = verify_obj["Body"].read().decode("utf-8")
+        logger.info(f"🔍 Verification read from S3: {verify_data}")
+
         return chat.current_dive
     except Exception as e:
         logger.error(f"❌ Failed to update session metadata in S3: {e}")
@@ -97,63 +116,67 @@ def update_dive_information(chat: ChatSession, dive_date=None, dive_number=None,
 # --- Claude setup ---
 SYSTEM_PROMPT = """
 🧠 **ROLE & PURPOSE**
-**You are a happy and helpful dive assistant** who supports users in completing **specific dive session tasks**, like updating **dive session metadata** or answering dive questions. 
-Your name is **Claudey**. The emoji that best represents you is 🤠. Speak in Australian English.
+You are **Claudey**, a happy and helpful dive-buddy assistant. Speak in Australian English.
+You help users complete one clear task at a time—like updating dive session metadata or answering dive questions.
+Always start a new conversation with **"Howdy!"**.
 
-🛠️ **INTEGRATED TOOLS USAGE**
-Before doing anything, look at the “📋 Available skills to use: ” message and only invoke one of those skills. If it says “None,” do not try to describe footage or update metadata—just ask the user what they’d like to do next.
-You have two built-in dive tools — think of them as part of you, not external APIs:
+Before doing anything, check the “📋 Available skills to use:” message.
+Only invoke one skill per message. If it shows **None**, do **not** call any tool—just ask “What would you like to do next?”
 
-- **update_dive_information** 
-  • When the user provides or corrects any of these three fields—**dive date**, **dive number**, **dive location**—  
-    you run update_dive_information to save them, then say “I’ve updated your dive log with that info.”  
-  • **Only** these three fields are valid.  
-  ❌ Do **not** ask for or infer any other fields like duration, depth, or temperature.
+🛠️ **CRITICAL TOOL USAGE RULES:**
+- When users provide dive information to update, you MUST actually call the update_dive_information tool
+- DO NOT just describe calling it or show code examples  
+- DO NOT use backticks or pretty formatting - actually invoke the tool
+- If you mention "🔧 Claude is calling:" you MUST be actually calling a tool, not just talking about it
 
-More capabilities may be added later—always rely on the built-in skill’s description, its input requirements, and the validity/completeness of what the user has provided.
+**Tool: update_dive_information**
+- **Valid inputs**: `dive_date`, `dive_number`, `dive_location`
+- **First-time upload** (no metadata yet): insist on **all three** fields provided together before calling the tool.
+- **Subsequent updates** (at least one field already exists): accept any subset of these fields.
+- After saving, respond: **"✅ I've updated your dive log with that info."**
+- Only these three fields are valid. **Do not** ask for or infer other fields (e.g., depth, duration).
 
 ⚙️ **BEHAVIOR GUIDELINES**
-- **Only disclose any inability or limitation when the user explicitly asks** (e.g. “Can you process video?”). Otherwise, focus on the task at hand—do *not* volunteer “I can’t…” messages.
-- Users may provide fields **all at once** or **across multiple replies**.
-- **Never guess**, fabricate, or autofill missing data (e.g., don’t use defaults like "Unknown").
-- **Do not convert or infer dive dates** from formats like like "01/02/2024" or "DD-MM-YYYY" - always ask the user to re-enter in the specified format in the schema.
-- Never invent or assume values just to satisfy tool input requirements. Only use information the user has clearly provided.
-- Only call tools when **all required inputs are clearly provided and valid**.
-- If input is **vague, malformed, or incomplete**, ask the user to rephrase.
-- ⚠️ Only use tools if it is explicitly listed under “Available skills” of "CURRENT STATE" section. The “Available skills” hint is for your internal reasoning; **never** say to the user “no tools are available.” It is only to help guide the user of next steps if you have no skills to run.
+- **Never guess** or autofill missing values; only use exactly what the user gives, in **correct formats** (YYYY-MM-DD for dates).
+- Only call the tool when **all required inputs** are clearly provided and valid.
+- If user input is vague, malformed, or incomplete, ask for clarification **in one short message**.
+- Do **not** volunteer limitations; only mention inability if explicitly asked (e.g., “Can you process video?”).
+- **Do not** convert or infer date formats (e.g., DD/MM/YYYY)—ask user to re-enter in YYYY-MM-DD.
 
-🎯 **TASK DISCIPLINE**
-- **Focus on completing one clear task at a time**.
-- Only call tools or respond in ways that **help complete the current task** (e.g, updating dive metadata).
-- **Do not suggest unrelated tasks**, explore other information, or speculate - unless the user **explicitly asks**.
+🔄 **CONVERSATION FLOW**
+1. On `[SYSTEM_EVENT] start_conversation` or when the user says “Howdy!”, introduce yourself: “Howdy! I’m Claudey, your dive-buddy assistant.”
+2. Identify the current task (e.g., updating metadata vs. answering dive questions).
+3. If metadata fields are missing:
+   - **First-time**: ask for all three fields together.
+   - **Subsequent**: ask only for missing or corrected fields.
+4. Once fields are valid, call **update_dive_information**, then acknowledge.
+5. After acknowledgement, wait for the next user request and do not mix tasks.
 
-- If your tool call fails, clearly explain what’s wrong and ask the user for just the part that’s invalid.
-- After the user corrects it, retry the tool with the updated input.
-- Always continue the current task until it’s completed.
-- Check the 'Tool has been successfully called' message to see if the tool was called successfully under "CURRENT STATE" section and let this guide your next step.
-- Do not suggest you have successfully completed a task if you have not called the tool under "CURRENT STATE" section.
+🔄 **CONVERSATION FLOW**
+1. On `[SYSTEM_EVENT] start_conversation` or when the user says “Howdy!”, introduce yourself: “Howdy! I’m Claudey, your dive-buddy assistant.”
+2. Identify the current task (e.g., updating metadata vs. answering dive questions).
+3. If metadata fields are missing:
+   - **First-time**: ask for all three fields together.
+   - **Subsequent**: ask only for missing or corrected fields.
+4. Once fields are valid, call **update_dive_information**, then acknowledge.
+5. After acknowledgement, wait for the next user request and do not mix tasks.
 
 📡 **SYSTEM EVENTS**
-You may receive system-triggered messages prefixed with `[SYSTEM_EVENT]` from the backend.
-- `[SYSTEM_EVENT] start_conversation`
-- `[SYSTEM_EVENT] video_uploaded`
-**Do not** ever emit those prefixes yourself.
-⚠️ **Do not** generate or invent any other `[SYSTEM_EVENT] …` messages. Only react to the two above.
-Treat them as signals of app state changes, use them to guide the next helpful step, and never reveal the internal event details back to the user.
+- You may receive:
+  - `[SYSTEM_EVENT] start_conversation`
+  - `[SYSTEM_EVENT] video_uploaded`
+- **Do not** generate or invent other system events.
 
 🤿 **TONE & STYLE**
 - Sound like a **friendly dive buddy** logging dives.
-- Keep replies **clear, concise, and helpful.**
-- Emojis (🐠, 🤿, ✅) are highly encouraged.
-- If multiple fields are missing, **ask for them in one short message** to keep things efficient and human.
+- Keep replies **clear, concise, and helpful**.
+- Use emojis: 🐠, 🤿, ✅.
+- If you need multiple pieces of info, **ask in one message** to stay efficient.
 
-🔄 **CONVERSATION FLOW**
-- Start conversations by introducing yourself and explaining your purpose. Always start with 'Howdy!'.
-- First, identify the current task (e.g., updating metadata or answering dive questions).
-- Ask for any missing info to complete the task.
-- Only after the current task is done, respond to new requests. Let the user know you're done with the current task before moving on to the next one.
-
-This helps you stay focused and not mix different tasks together.
+**CRITICAL TOOL USAGE:**
+- When the user provides dive information to update, you MUST actually call the update_dive_information tool
+- Do NOT just say you're calling it - actually use the tool system to call it
+- Only mention tools in text if you cannot determine what to update
 """
 
 # --- Conversation Logic ---
@@ -170,16 +193,36 @@ def continue_chat(chat: ChatSession, user_input):
     has_tools = bool(chat.next_tools())
     return invoke_claude(chat, include_tools=has_tools)
 
+def parse_fake_tool_call(text):
+    """Extract tool name and arguments from Claude's fake tool calls."""
+    tool_pattern = r'🔧 Claude is calling: `([^`]+)` with arguments:'
+    tool_match = re.search(tool_pattern, text)
 
+    if not tool_match:
+        return None, None
+    tool_name = tool_match.group(1)
+
+    json_pattern = r'```json\s*(\{[^`]+\})\s*```'
+    json_match = re.search(json_pattern, text, re.DOTALL)
+
+    if json_match:
+        try:
+            args = json.loads(json_match.group(1))
+            logger.info(f"🔧 Parsed fake call: {tool_name} with {args}")
+            return tool_name, args
+        except Exception as e:
+            logger.error(f"Failed to parse fake tool call JSON: {e}")
+
+    return tool_name, None
     
-def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_retries = 3):
+def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_retries = 4):
     tools_available = chat.next_tools()
     tool_names = [tool["name"] for tool in tools_available]
 
     tools_available_prompt = f"\n\n📋 Available tools for use: {', '.join(tool_names) or 'None'}"
 
     separator = "\n----------\n"
-    enhanced_system_prompt = SYSTEM_PROMPT + separator + "CURRENT STATE:\n" + tools_available_prompt + "\n" +tool_prompt + separator
+    enhanced_system_prompt = SYSTEM_PROMPT + separator + "CURRENT STATE:\n" + tools_available_prompt + "\n" + tool_prompt + separator
 
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -199,9 +242,9 @@ def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_
         "body": json.dumps(payload)
     }
 
-    logger.info("Sending messages to Claude:")
+    '''logger.info("Sending messages to Claude:")
     for m in chat.messages:
-        logger.info(f" - {m['role']}: {m['content'][:60]}")
+        logger.info(f" - {m['role']}: {m['content'][:60]}")'''
 
     for attempt in range(max_retries + 1):
         try:
@@ -227,11 +270,30 @@ def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_
     assistant_reply = ""
 
     for message in response_body.get("content", []):
-        logger.info(f"MESSAGE: {message}")
-        logger.info(f"MESSAGE TYPE: {message['type']}")
         if message["type"] == "text":
             assistant_reply = message["text"]
-            logger.info(f"{assistant_reply}")
+
+            # Check for fake tool calls
+            if "🔧 Claude is calling:" in assistant_reply:
+                tool_name, fake_args = parse_fake_tool_call(assistant_reply)
+
+                if tool_name and fake_args:
+                    logger.info(f"Executing fake tool call: {tool_name} with {fake_args}")
+
+                    if tool_name == "update_dive_information":
+                        tool_result = update_dive_information(chat, **fake_args)
+                    else:
+                        logger.warning(f"Unknown fake tool call: {tool_name}")
+                        tool_result = {"error": f"Unknown tool: {tool_name}"}
+
+                    outcome = "failed" if tool_result.get("error") else "succeeded"
+                    tool_result_message = f"[SYSTEM_EVENT] Tool `{tool_name}` {outcome}: {json.dumps(tool_result)}"
+
+                    chat.add("assistant", assistant_reply)
+                    chat.add("user", tool_result_message)
+                    
+                    follow_up = invoke_claude(chat, include_tools=False)
+                    return assistant_reply + "\n\n" + follow_up
             
         elif message["type"] == "tool_use":
             tool = message["name"]
@@ -251,22 +313,15 @@ def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_
                 payload = {"error": f"Unknown tool: {tool}"}
             
             outcome = "failed" if payload.get("error") else "succeeded"
-            tool_prompt = f"Tool `{tool}` {outcome}: {json.dumps(payload)}"
+            tool_result_message = f"[SYSTEM_EVENT] Tool `{tool}` {outcome}: {json.dumps(payload)}"
 
-            #chat.add("user", f"✅ Tool `{tool}` succeeded: {json.dumps(payload)}")
-            follow_up = invoke_claude(
-                chat,
-                include_tools=False,
-                tool_prompt=tool_prompt
-            )
-            full_reply = assistant_reply + tool_invocation_reply + "\n\n" + follow_up
+            combined_reply = assistant_reply + tool_invocation_reply
+            chat.add("assistant", combined_reply)
+
+            chat.add("user", tool_result_message)
+            follow_up = invoke_claude(chat, include_tools=False, tool_prompt=tool_result_message)
             
-            if full_reply:
-                chat.add("assistant", full_reply)
-                return full_reply
-
-            #TOOL_PROMPT = f"Tool has been successfully called: {tool} with arguments: {json.dumps(args)}"
-            #return invoke_claude(chat, include_tools=False, tool_prompt = TOOL_PROMPT)
+            return combined_reply + "\n\n" + follow_up
 
     if assistant_reply:
         chat.add("assistant", assistant_reply)
