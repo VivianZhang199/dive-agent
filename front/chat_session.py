@@ -24,14 +24,14 @@ class ChatSession:
         """Add a message to the chat session with validation.
         
         Args:
-            role: The role of the message sender ('user', 'assistant', or 'system')
+            role: The role of the message sender ('user', 'assistant', 'tool')
             text: The message content
             
         Raises:
             ValueError: If role is invalid or text is empty
         """
-        if role not in ["user", "assistant", "tool", "tool_result"]:
-            raise ValueError(f"Invalid role '{role}'. Must be one of the following: user, assistant, tool, tool_result")
+        if role not in ["user", "assistant", "tool"]:
+            raise ValueError(f"Invalid role '{role}'. Must be one of the following: user, assistant, tool")
         
         if not text or not isinstance(text, str):
             raise ValueError("Message text must be a string")
@@ -48,7 +48,7 @@ class ChatSession:
         tools = []
 
         if not metadata_done:
-            tools.append("update_session_metadata")
+            tools.append("update_dive_information")
         
-        tools.append("get_gpt_analysis")
+        tools.append("get_dive_analysis")
         return [t for t in self.available_tools if t["name"] in tools]

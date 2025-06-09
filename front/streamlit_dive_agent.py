@@ -7,12 +7,11 @@ import time
 import boto3
 import streamlit as st
 from botocore.exceptions import ClientError
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from chat_session import ChatSession
 from config import config
-from dive_agent_bedrock import start_chat, continue_chat, ALL_TOOLS
+from dive_agent_bedrock import start_chat, continue_chat, ALL_TOOLS, send_system_event
 from utils import load_json_from_s3
 
 # Initialise clients and logger
@@ -104,7 +103,7 @@ with st.sidebar:
             chat.metadata_done = False
             
             # Send a system event to the chat session so that Claude knows the video has been uploaded
-            continue_chat(chat, "[SYSTEM_EVENT] video_uploaded")
+            send_system_event(chat, "[SYSTEM_EVENT] video_uploaded")
 
             st.session_state["last_uploaded_filename"] = uploaded_file.name
             
@@ -179,5 +178,6 @@ with st.expander("🔍 Debug"):
         "current_dive": chat.current_dive,
         "next_tools": chat.next_tools(),
         "last_uploaded_filename": st.session_state.get("last_uploaded_filename"),
+        "uploaded_file": uploaded_file,
         "messages": [f"{message['role']}: {message['content'][:60]}..." for message in chat.messages]
     })
