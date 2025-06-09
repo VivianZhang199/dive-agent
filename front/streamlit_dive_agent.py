@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "s
 
 from chat_session import ChatSession
 from config import config
-from dive_agent_bedrock import start_chat, continue_chat, UPDATE_METADATA_TOOL
+from dive_agent_bedrock import start_chat, continue_chat, ALL_TOOLS
 from utils import load_json_from_s3
 
 # Initialise clients and logger
@@ -70,7 +70,7 @@ def has_complete_metadata(metadata: dict) -> bool:
 
 # Initialise the chat session
 if "chat" not in st.session_state:
-    chat = ChatSession(available_tools=[UPDATE_METADATA_TOOL])
+    chat = ChatSession(available_tools=ALL_TOOLS)
     st.session_state["chat"] = chat
 
 # Get the chat session from the session state
@@ -83,8 +83,9 @@ if "chat_started" not in st.session_state:
     
 # Left sidebar [Top section]: Video Upload
 with st.sidebar:
-    st.subheader("Upload a dive video!")
+    st.subheader("Upload Dive Footage")
     uploaded_file = st.file_uploader("Note: .mp4 or .mov videos are supported.", type=["mp4", "mov"])
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # If a new video is uploaded, process it and update the chat session
     if uploaded_file and uploaded_file.name != st.session_state.get("last_uploaded_filename"):
@@ -154,20 +155,20 @@ for message in chat.messages:
     role = message["role"]
     if role == "assistant":
         with st.chat_message(role):
-            st.write(f"**Dive Buddy Claude:** {content}")
+            st.write(f"**Claudey:** {content}")
     else:
         with st.chat_message("user"):
             st.write(f"**You:** {content}")
 
 # User interaction
-user_input = st.chat_input("Talk to Dive Buddy Claude.")
+user_input = st.chat_input("Talk to Claudey.")
 
 if user_input:
     st.chat_message("user").write(f"**You:** {user_input}")
     # After the user input, continue the chat session with Claude
     assistant_reply = continue_chat(chat, user_input)
     with st.chat_message("assistant"):
-        st.write(f"**Dive Buddy Claude:** {assistant_reply}")
+        st.write(f"**Claudey:** {assistant_reply}")
 
 # Debug section to help with dev
 with st.expander("🔍 Debug"):

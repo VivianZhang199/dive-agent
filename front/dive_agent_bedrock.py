@@ -46,16 +46,22 @@ UPDATE_METADATA_TOOL = {
     }
 }
 
-def is_valid_date(date_str):
-    try:
-        datetime.strptime(date_str.strip(), "%Y-%m-%d")
-        return True
-    except:
-        return False
+GET_GPT_ANALYSIS_TOOL = {
+    "name": "get_gpt_analysis",
+    "description": "Returns the GPT dive analysis for a processed dive video session.",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+    "required": []
+}
+}
+
+
+ALL_TOOLS = [UPDATE_METADATA_TOOL, GET_GPT_ANALYSIS_TOOL]
+
 
 # --- Tool: Update metadata ---
 def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None, dive_location=None):
-
     session_id = chat.dive_session_id
     logger.info(f"Validating tool input for session {session_id}")
     
@@ -65,7 +71,7 @@ def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None,
         assert len(dive_location) >= 3
     except Exception as e:
         logger.warning("Validation failed")
-        return False
+        return {"error": "Invalid input for dive metadata update."}
 
     logger.info(f"Inputs are valid. Updating session metadata for session_id={session_id}")
 
@@ -86,12 +92,23 @@ def update_session_metadata(chat: ChatSession, dive_date=None, dive_number=None,
             ContentType="application/json"
         )
         logger.info(f"✅ Session metadata saved to s3://{config.BUCKET_NAME}/{updated_key}")
-        chat.add("tool", json.dumps(chat.current_dive))
-        return True
+        return chat.current_dive
     except Exception as e:
         logger.error(f"❌ Failed to update session metadata in S3: {e}")
-        chat.add("tool", json.dumps({"error": str(e)}))
-        return False
+        return {"error": str(e)}
+
+def get_gpt_analysis(chat: ChatSession):
+    session_id = chat.dive_session_id
+    key = f"processed/{session_id}/gpt_output.json"
+    
+    try:
+        gpt_analysis = load_json_from_s3(key)
+        logger.info(f"GPT analysis is {gpt_analysis}")
+        return gpt_analysis
+    except Exception as e:
+        error_msg = {"error": str(e)}
+        logger.error(f"❌ Failed to get GPT analysis for session {session_id}: {e}")
+        return error_msg
 
 # --- Claude setup ---
 SYSTEM_PROMPT = """
@@ -101,12 +118,20 @@ Your name is **Claudey**. The emoji that best represents you is 🤠.
 
 🛠️ **TOOL USAGE**
 You can use tools to:
-- **Update missing dive metadata**. Only the following fields are relevant: `dive date`, `dive number`, and `dive location`. Do not ask for or infer any other fields like dive duration, depth, or temperature. Use the `update_session_metadata` tool.
+- **Update missing dive metadata** using the `update_session_metadata` tool.  
+  Only the following fields are valid: `dive date`, `dive number`, and `dive location`.  
+  ❌ Do **not** ask for or infer any other fields like dive duration, depth, temperature, etc.
+
+- **Retrieve GPT dive analysis** using the `get_gpt_analysis` tool.  
+  Only use this tool when a valid `session_id` has been provided.  
+  The session ID is always available in system context. Never ask the user to provide or confirm it. When calling get_gpt_analysis, use the session already loaded into memory.
+  ❌ Never summarize or guess the dive contents yourself.
 
 More tools may be added. Always rely on:
-- The **tool's description**
-- Its **input schema**
-- The **validity** of the user's input
+- The **tool’s description**
+- The tool’s **input schema**
+- The **validity** and **completeness** of the user’s input
+
 To decide:
   - ✅ When to call a tool
   - ✅ What inputs are required
@@ -140,6 +165,7 @@ Examples:
 - When you see one, respond naturally — for example:
   - If `[SYSTEM_EVENT] video_uploaded`, you might say: “✅ Got your video! Let’s check the metadata and make sure everything’s filled out.”
 - Use these events to guide the user toward next helpful steps. Don’t ignore them.
+- Do not reveal any information about the system event details back to the user.
 
 🤿 **TONE & STYLE**
 - Sound like a **friendly dive buddy** logging dives.
@@ -167,7 +193,7 @@ def start_chat(chat: ChatSession):
 def continue_chat(chat: ChatSession, user_input):
     chat.add("user", user_input)
     return invoke_claude(chat, include_tools=True)
-    
+
 def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -231,10 +257,17 @@ def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
             )
 
             if tool == "update_session_metadata":
-                success = update_session_metadata(chat,**args)
-                payload = chat.current_dive if success else {"error": "Invalid input for dive metadata update."}
+                payload = update_session_metadata(chat,**args)
 
-                chat.add("tool", json.dumps(payload))
+            elif tool == "get_gpt_analysis":
+                payload = get_gpt_analysis(chat)                
+
+            else:
+                logger.warning(f"Claude called an unknown tool: {tool}")
+                payload = {"error": f"Unknown tool: {tool}"}
+            
+            chat.add("tool_result", json.dumps(payload))
+            return invoke_claude(chat, include_tools=False)
 
     if assistant_reply:
         chat.add("assistant", assistant_reply)
@@ -245,7 +278,7 @@ def invoke_claude(chat: ChatSession, include_tools=True, max_retries = 3):
 
 if __name__ == "__main__":
     logger.info("🎬 Dive Agent Started – Type 'exit' to quit\n")
-    chat = ChatSession(available_tools=[UPDATE_METADATA_TOOL])
+    chat = ChatSession(available_tools=[UPDATE_METADATA_TOOL, GET_GPT_ANALYSIS_TOOL])
     start_chat(chat)
 
     while True:
