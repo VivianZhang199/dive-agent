@@ -29,7 +29,7 @@ UPDATE_DIVE_INFORMATION_TOOL = {
     "name": "update_dive_information",
     "description": (
         "Use this tool to store or update core dive session details. "
-        "All fields (`dive_date`, `dive_number`, `dive_location`) must be clearly provided by the user before calling this tool if they are all missing. Otherwise, accept partial information and update the fields that are provided."
+        "Partial or all fields (`dive_date`, `dive_number`, `dive_location`) must be clearly provided by the user before calling this tool if they are all missing. User may confirm they only want to update one field at a time."
     ),
     "input_schema": {
         "type": "object",
@@ -169,6 +169,8 @@ def continue_chat(chat: ChatSession, user_input):
     chat.add("user", user_input)
     has_tools = bool(chat.next_tools())
     return invoke_claude(chat, include_tools=has_tools)
+
+
     
 def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_retries = 3):
     tools_available = chat.next_tools()
@@ -248,8 +250,6 @@ def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_
                 logger.warning(f"Claude called an unknown tool: {tool}")
                 payload = {"error": f"Unknown tool: {tool}"}
             
-            #chat.add("tool", json.dumps(payload))
-
             outcome = "failed" if payload.get("error") else "succeeded"
             tool_prompt = f"Tool `{tool}` {outcome}: {json.dumps(payload)}"
 
@@ -259,7 +259,11 @@ def invoke_claude(chat: ChatSession, include_tools=False, tool_prompt = "", max_
                 include_tools=False,
                 tool_prompt=tool_prompt
             )
-            return assistant_reply + tool_invocation_reply + "\n\n" + follow_up
+            full_reply = assistant_reply + tool_invocation_reply + "\n\n" + follow_up
+            
+            if full_reply:
+                chat.add("assistant", full_reply)
+                return full_reply
 
             #TOOL_PROMPT = f"Tool has been successfully called: {tool} with arguments: {json.dumps(args)}"
             #return invoke_claude(chat, include_tools=False, tool_prompt = TOOL_PROMPT)
