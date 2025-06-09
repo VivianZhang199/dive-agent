@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "s
 
 from chat_session import ChatSession
 from config import config
-from dive_agent_bedrock import start_chat, continue_chat, UPDATE_METADATA_TOOL
+from dive_agent_bedrock import start_chat, continue_chat, ALL_TOOLS
 from utils import load_json_from_s3
 
 # Initialise clients and logger
@@ -70,7 +70,7 @@ def has_complete_metadata(metadata: dict) -> bool:
 
 # Initialise the chat session
 if "chat" not in st.session_state:
-    chat = ChatSession(available_tools=[UPDATE_METADATA_TOOL])
+    chat = ChatSession(available_tools=ALL_TOOLS)
     st.session_state["chat"] = chat
 
 # Get the chat session from the session state
@@ -100,7 +100,7 @@ with st.sidebar:
             # Update the chat session with the new video
             chat.dive_session_id = session_id
             chat.current_dive = {}
-            chat.metadata_done = False
+            #chat.metadata_done = False
             
             # Send a system event to the chat session so that Claude knows the video has been uploaded
             continue_chat(chat, "[SYSTEM_EVENT] video_uploaded")
@@ -125,8 +125,8 @@ with st.sidebar:
             # If the metadata is available (i.e., the video has been processed by the pipeline), load it into the chat session.
             if metadata_key:
                 chat.current_dive = load_json_from_s3(metadata_key)
-                chat.metadata_done = has_complete_metadata(chat.current_dive)
-                st.success("✅ The dive metadata has been loaded into the chat session.")
+                #chat.metadata_done = has_complete_metadata(chat.current_dive)
+                st.success("✅ The dive video has been processed.")
             else:
                 st.error("⏳ Timed out waiting to retrieve the session metadata. Re-check that the video has been processed by the pipeline.")
 

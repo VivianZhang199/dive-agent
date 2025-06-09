@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 from typing import List, Dict, Optional, Literal
 
-UPDATE_METADATA_TOOL = None
+UPDATE_DIVE_INFORMATION_TOOL = None
 GET_GPT_TOOL = None
 
 MessageRole = Literal["user", "assistant", "tool"]
@@ -42,5 +42,6 @@ class ChatSession:
         """ Return only the tools Claude may see right now."""
         if self.dive_session_id is None: #no video yet
             return []
-        metadata_done = all(self.current_dive.get(field) for field in ["dive_date", "dive_number", "dive_location"])
-        return [] if metadata_done else self.available_tools
+        #metadata_done = all(self.current_dive.get(field) for field in ["dive_date", "dive_number", "dive_location"])
+        #return [] if metadata_done else self.available_tools
+        return self.available_tools
